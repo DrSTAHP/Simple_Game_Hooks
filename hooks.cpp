@@ -5,6 +5,7 @@
 static BYTE EndSceneStolenBytes[7];
 static callback_endscene_t oEndScene = nullptr;
 static callback_endscene_t pEndSceneCallbackHolder = nullptr;
+static BYTE* pEndSceneGateway = nullptr;
 
 static void APIENTRY EndScene_Hook(IDirect3DDevice9* pDevice)
 {
@@ -67,21 +68,21 @@ bool Hooks::HookEndScene(callback_endscene_t pCallback)
 
 	//Allocate a block for stolen bytes + jmp to original function
 
-	BYTE* pGateway = (BYTE*)VirtualAlloc(0, iLen, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+	pEndSceneGateway = (BYTE*)VirtualAlloc(0, iLen, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 	
 	//Save stolen bytes in the unhook array and gateway
 
-	memcpy(pGateway, pEndScene, iLen);
+	memcpy(pEndSceneGateway, pEndScene, iLen);
 	memcpy(EndSceneStolenBytes, pEndScene, iLen);
 
 	//Calculate the jump-back distance to the original function
 
-	DWORD OrgToGateway = (DWORD)pEndScene - (DWORD)pGateway - 5; // -5 for jmp
+	DWORD OrgToGateway = (DWORD)pEndScene - (DWORD)pEndSceneGateway - 5; // -5 for jmp
 
 	//Write the jump
 
-	*(pGateway + iLen) = 0xE9; //jmp 
-	*(DWORD*)((DWORD)pGateway + iLen + 1) = OrgToGateway;
+	*(pEndSceneGateway + iLen) = 0xE9; //jmp 
+	*(DWORD*)((DWORD)pEndSceneGateway + iLen + 1) = OrgToGateway;
 
 
 	//Create a hook
@@ -107,7 +108,7 @@ bool Hooks::HookEndScene(callback_endscene_t pCallback)
 	//Setup user callbacks
 
 	pEndSceneCallbackHolder = pCallback;
-	oEndScene = (callback_endscene_t)pGateway;
+	oEndScene = (callback_endscene_t)pEndSceneGateway;
 }
 ///////////////////////////////////////////////////////////
 
@@ -124,8 +125,13 @@ void Hooks::UnHookEndScene()
 	VirtualProtect(pEndScene, sizeof(EndSceneStolenBytes), PAGE_EXECUTE_READWRITE, &Protection);
 
 	memcpy(pEndScene, EndSceneStolenBytes, sizeof(EndSceneStolenBytes));
-	
-	memcpy(EndSceneStolenBytes, 0, sizeof(EndSceneStolenBytes));
+
+	DWORD temp;
+	VirtualProtect(pEndScene, sizeof(EndSceneStolenBytes), Protection, &temp);
+
+	if (pEndSceneGateway != nullptr)
+		VirtualAlloc(pEndSceneGateway, sizeof(EndSceneStolenBytes), MEM_RESET, PAGE_GUARD);
+
 	oEndScene = nullptr;
 	pEndSceneCallbackHolder = nullptr;
 }
